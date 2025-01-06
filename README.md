@@ -23,7 +23,7 @@ This is a simple FastAPI application to manage contacts. It supports the followi
     python contacts_api.py
     ```
 
-- **Access the application**:
+- **Access the Application**:
     Navigate to `http://127.0.0.1:8800` in your browser.
 
 - **API Documentation**:
