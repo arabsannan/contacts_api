@@ -1,62 +1,36 @@
 import csv
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import List
 from pathlib import Path
+from typing import Optional
+
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, EmailStr
 
 """
 Program: Contacts Manager API
-Description: This is a simple FastAPI application to manage contacts. It supports the following operations: create a new contact,
-            retrieve all contacts, update a contact, and search for contacts by name or email.
-Dependencies: FASTAPI, uvicorn
+Description: This is a simple FastAPI application to manage contacts. It supports the following 
+                operations: create a new contact, update a contact, and search for contacts
+                by name or email.
 """
 
 # Path to the CSV file
 CONTACTS_FILE = 'contacts.csv'
 
 # Pydantic model for validating contact data
-class Contact(BaseModel):
-    name: str
-    email: str
-    phone: str
 
-# Pydantic model for response data
-class ContactInResponse(Contact):
-    id: int
+
+class Contact(BaseModel):
+    name: str = Field(..., min_length=2, max_length=50,
+                      description="Contact's name")
+    email: Optional[EmailStr] = None
+    phone: str = Field(..., min_length=10, max_length=15,
+                       description="Contact's phone number")
 
 
 app = FastAPI()
 
-@app.get("/api/contacts", response_model=List[ContactInResponse])
-def get_all_contacts():
-    """
-    Get the list of all contacts stored in csv file.
 
-    Returns:
-        JSONResponse: A response object containing the contacts data and a 200 HTTP status code.
-
-    Raises:
-        HTTPException: If the contacts cannot be retrieved, a 404 HTTP status code is returned.
-    """
-    contacts = retrieve_contacts()
-
-    if not contacts:
-        response = {
-            "code": 404,
-            "message": "No contacts found"
-        }
-        return JSONResponse(content=response, status_code=404)
-        # raise HTTPException(status_code=404, detail="No contacts found.")
-
-    response = {
-        "code": 200,
-        "data": contacts
-    }
-    return JSONResponse(content=response, status_code=200)
-
-
-@app.post("/api/contacts", response_model=ContactInResponse)
+@app.post("/api/contacts")
 async def create_contact(contact: Contact):
     """
     Creates a new contact.
@@ -65,7 +39,10 @@ async def create_contact(contact: Contact):
         contact (Contact): The contact data to be created.
 
     Returns:
-        ContactInResponse: The created contact's response model.
+        JSONResponse: Contains a success message and created contact's data.
+
+    Note:
+        The `save_contacts` function saves a list of contact dictionaries to the CSV file.
     """
     contacts = retrieve_contacts()
     contact_id = max([contact['id'] for contact in contacts], default=0) + 1
@@ -77,10 +54,83 @@ async def create_contact(contact: Contact):
     }
     contacts.append(new_contact)
     save_contacts(contacts)
-    return new_contact
+    response = {
+        "code": 200,
+        "message": "Contact created successfully",
+        "data": new_contact
+    }
+    return JSONResponse(content=response, status_code=200)
 
 
-@app.get("/api/contacts/{id:int}", response_model=ContactInResponse)
+@app.put("/api/contacts/{id}")
+async def update_contact(id: int, contact: Contact):
+    """
+    Update an existing a contact by ID.
+
+    Args:
+        id (int): The ID of the contact to retrieve.
+        contact (Contact): The updated contact data.
+
+    Returns:
+        JSONResponse: Contains a success message and updated contact's data or 
+                    an empty array if no contact with the specified ID exists.
+    """
+    contacts = retrieve_contacts()
+    existing_contact = next(
+        (contact for contact in contacts if contact['id'] == id), None)
+    if existing_contact is None:
+        response = {
+            "code": 404,
+            "message": "Contact does not exist",
+            "data": []
+        }
+        return JSONResponse(content=response, status_code=404)
+
+    existing_contact['name'] = contact.name
+    existing_contact['email'] = contact.email
+    existing_contact['phone'] = contact.phone
+    save_contacts(contacts)
+    response = {
+        "code": 200,
+        "message": "Contact updated successfully",
+        "data": existing_contact
+    }
+    return JSONResponse(content=response, status_code=200)
+
+
+@app.get("/api/contacts/search")
+async def search_contacts(query: str = ""):
+    """
+    Search for contacts by name or email.
+
+    Args:
+        query (str): The search query string.
+
+    Returns:
+        JSONResponse: Contains the data of contacts that match the search query in 
+                their name or email. If no query is provided, all contacts are returned.
+    """
+    contacts = retrieve_contacts()
+    query = query.lower()
+    matched_contacts = [contact for contact in contacts if query in
+                        contact['name'].lower() or query in contact['email'].lower()]
+    if not matched_contacts:
+        response = {
+            "code": 200,
+            "message": "No match found",
+            "data": []
+        }
+        return JSONResponse(content=response, status_code=200)
+
+    response = {
+        "code": 200,
+        "message": "Contacts retrieved successfully",
+        "data": matched_contacts
+    }
+    return JSONResponse(content=response, status_code=200)
+
+
+@app.get("/api/contacts/{id:int}")
 async def get_contact(id: int):
     """
     Retrieve an existing a contact by ID.
@@ -103,63 +153,41 @@ async def get_contact(id: int):
         }
         return JSONResponse(content=response, status_code=404)
 
-    return contact
+    response = {
+        "code": 200,
+        "message": "Contact retrieved successfully",
+        "data": contact
+    }
+    return JSONResponse(content=response, status_code=200)
 
 
-@app.put("/api/contacts/{id}", response_model=ContactInResponse)
-async def update_contact(id: int, contact: Contact):
+@app.get("/api/contacts")
+def get_all_contacts():
     """
-    Update an existing a contact by ID.
-
-    Args:
-        id (int): The ID of the contact to retrieve.
-        contact (Contact): The updated contact data.
+    Get the list of all contacts stored in csv file.
 
     Returns:
-        ContactInResponse: The updated contact's response model  or `None` if no contact with the specified ID exists.
+        JSONResponse: A response object containing the contacts data and a 200 HTTP status code.
+
+    Raises:
+        HTTPException: If the contacts cannot be retrieved, a 404 HTTP status code is returned.
     """
     contacts = retrieve_contacts()
-    existing_contact = next(
-        (contact for contact in contacts if contact['id'] == id), None)
-    if existing_contact is None:
+
+    if not contacts:
         response = {
-            "code": 404,
-            "message": "Contact does not exist"
+            "code": 200,
+            "message": "No contacts found",
+            "data": []
         }
-        return JSONResponse(content=response, status_code=404)
-        # raise HTTPException(status_code=404, detail="Contact not found")
+        return JSONResponse(content=response, status_code=200)
 
-    existing_contact['name'] = contact.name
-    existing_contact['email'] = contact.email
-    existing_contact['phone'] = contact.phone
-    save_contacts(contacts)
-    return existing_contact
-
-
-@app.get("/api/contacts/search", response_model=List[ContactInResponse])
-async def search_contacts(query: str = ""):
-    """
-    Search for contacts by name or email.
-
-    Args:
-        query (str): The search query string.
-
-    Returns:
-        List[ContactInResponse]: A list of contacts that match the search query 
-                                 in their name or email. If no query is provided, 
-                                 all contacts are returned.
-    """
-    contacts = retrieve_contacts()
-    query = query.lower()
-    matched_contacts = [contact for contact in contacts if query in contact['name'].lower(
-    ) or query in contact['email'].lower()]
-    if not matched_contacts:
-        response = {
-            "code": 404,
-            "message": "No match found"
-        }
-        return JSONResponse(content=response, status_code=404)
-    return matched_contacts
+    response = {
+        "code": 200,
+        "message": "Contacts retrieved successfully",
+        "data": contacts
+    }
+    return JSONResponse(content=response, status_code=200)
 
 
 def retrieve_contacts():
@@ -175,10 +203,10 @@ def retrieve_contacts():
             reader = csv.DictReader(file)
             for row in reader:
                 contacts.append({
-                    'id': int(row['id']),
-                    'name': row['name'],
-                    'email': row['email'],
-                    'phone': row['phone']
+                    'id': int(row.get('id')),
+                    'name': row.get('name'),
+                    'email': row.get('email'),
+                    'phone': row.get('phone')
                 })
     return contacts
 
